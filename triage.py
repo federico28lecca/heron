@@ -3,7 +3,6 @@
 import re
 import os
 import sys
-from idlelib.autocomplete import FILES
 
 W_REPLY_TO_MISMATCH = 2
 
@@ -11,55 +10,69 @@ W_AUTH_FAIL = 2
 
 W_BRAND_MISMATCH = 3
 
-PHISHING = 3
+PHISHING_THRESHOLD = 5
 
-W_PUNYCODE = 3
+SUSPICIOUS_THRESHOLD = 3
+
+W_PUNYCODE_LINK = 3
 
 W_IP_LINK = 3
 
-W_KEYWORDS = 1
+W_KEYWORD = 1
 
 
 KEYWORDS = ["urgent", "verify", "suspended", "password", "expires", "act now",
             "congratulations", "winner", "claim", "immediately", "gift card"]
 
-def check_mail(folder , flagged=None):
+
+def header(raw, name):
+    """Returns the value of the first occurence of the `name:` pattern in the
+    email header, or `?` if missing."""
+    match = re.search(name + ": (.*)", raw)
+    if match is None:
+        return "?"
+    return match.group(1)
+
+
+def sender_domain(address):
+    """Return the email address domain or None if `@` is missing."""
+    match = re.search("@([a-zA-Z0-9.-]+)", address)
+    if match is None:
+        return None
+    return match.group(1)
+
+
+def check_mail(folder, flagged=None):
     scores = {}
     verdicts = []
 
     if flagged is None:
         flagged = []
+
     files = os.listdir(folder)
     for fn in files:
         if not fn.endswith(".eml"):
             continue
-        with open(os.path.join(folder, fn), encoding="utf-8", errors="ignore") as raw:
-            raw.read()
+
+        with open(os.path.join(folder, fn), encoding="utf-8", errors="ignore") as f:
+            raw = f.read()
+
         s = 0
 
-        frm = re.search("From: (.*)", raw)
-        if frm is None:
-            frm = "?"
-        else:
-            frm = frm.group(1)
-
-        subj = re.search("Subject: (.*)", raw)
-        if subj is None:
-            subj = "?"
-        else:
-            subj = subj.group(1)
-
+        frm = header(raw, "From")
+        subj = header(raw, "Subject")
         low = raw.lower()
+
         for kw in KEYWORDS:
             if kw in low:
-                s = s + W_KEYWORDS
+                s = s + W_KEYWORD
         # links that look bad
         urls = re.findall("https?://[^\\s\"'<>]+", raw)
         for u in urls:
             if re.match("https?://[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+", u):
                 s = s + W_IP_LINK  # ip address url, very bad
-            if "xn--" in u:
-                s = s + W_PUNYCODE
+            if "xn--" in u:  # punycode
+                s = s + W_PUNYCODE_LINK
         # sender says paypal/microsoft/amazon but domain is weird
         if "paypal" in frm.lower() and "paypal.com" not in frm.lower():
             s = s + W_BRAND_MISMATCH
@@ -70,20 +83,17 @@ def check_mail(folder , flagged=None):
         if "spf=fail" in low or "dmarc=fail" in low:
             s = s + W_AUTH_FAIL
         # reply-to different from from
-        try:
-            rt = re.search("Reply-To: (.*)", raw).group(1)
-            m1 = re.search("@([a-zA-Z0-9.-]+)", frm).group(1)
-            m2 = re.search("@([a-zA-Z0-9.-]+)", rt).group(1)
-            if m1 != m2:
-                s = s + W_REPLY_TO_MISMATCH
-        except Exception as e:
-            print(e)
+
+        from_domain = sender_domain(frm)
+        reply_domain = sender_domain(header(raw, "Reply-To"))
+        if from_domain and reply_domain and from_domain != reply_domain:
+            s = s + W_REPLY_TO_MISMATCH
 
         scores[fn] = s
-        if s >= 5:
+        if s >= PHISHING_THRESHOLD:
             verdicts.append((fn, "PHISHING", s))
             flagged.append(fn)
-        elif s >= PHISHING:
+        elif s >= SUSPICIOUS_THRESHOLD:
             verdicts.append((fn, "suspicious", s))
         else:
             verdicts.append((fn, "ok", s))
@@ -98,12 +108,9 @@ def check_mail(folder , flagged=None):
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        print("You have to pass a folder as argument", file=sys.stderr)
+        print("you must pass a folder path as argument", file=sys.stderr)
         sys.exit(2)
-
     try:
         check_mail(sys.argv[1])
     except FileNotFoundError:
-        print("error: no such foldere", file=sys.stderr)
-
-
+        print("error: no such folder", file=sys.stderr)
