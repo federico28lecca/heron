@@ -3,6 +3,7 @@
 import re
 import os
 import sys
+from idlelib.autocomplete import FILES
 
 W_REPLY_TO_MISMATCH = 2
 
@@ -35,14 +36,19 @@ def check_mail(folder , flagged=None):
         with open(os.path.join(folder, fn), encoding="utf-8", errors="ignore") as raw:
             raw.read()
         s = 0
-        try:
-            frm = re.search("From: (.*)", raw).group(1)
-        except:
+
+        frm = re.search("From: (.*)", raw)
+        if frm is None:
             frm = "?"
-        try:
-            subj = re.search("Subject: (.*)", raw).group(1)
-        except:
+        else:
+            frm = frm.group(1)
+
+        subj = re.search("Subject: (.*)", raw)
+        if subj is None:
             subj = "?"
+        else:
+            subj = subj.group(1)
+
         low = raw.lower()
         for kw in KEYWORDS:
             if kw in low:
@@ -70,8 +76,9 @@ def check_mail(folder , flagged=None):
             m2 = re.search("@([a-zA-Z0-9.-]+)", rt).group(1)
             if m1 != m2:
                 s = s + W_REPLY_TO_MISMATCH
-        except:
-            pass
+        except Exception as e:
+            print(e)
+
         scores[fn] = s
         if s >= 5:
             verdicts.append((fn, "PHISHING", s))
@@ -93,6 +100,10 @@ if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("You have to pass a folder as argument", file=sys.stderr)
         sys.exit(2)
-    check_mail(sys.argv[1])
+
+    try:
+        check_mail(sys.argv[1])
+    except FileNotFoundError:
+        print("error: no such foldere", file=sys.stderr)
 
 
