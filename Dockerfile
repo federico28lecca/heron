@@ -28,12 +28,11 @@ RUN useradd --create-home app
 RUN mkdir -p /data
 RUN chown app /data
 
-
-
-
 ################################ from now on only docker run commands are executed
 
 USER app
 ENV PATH="$PATH:/app/.venv/bin"
+ENV HERON_DB=/data/verdicts.db
 ENTRYPOINT ["heron"]
 CMD ["/app/data/samples"]
+
